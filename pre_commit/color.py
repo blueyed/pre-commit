@@ -11,10 +11,10 @@ if os.name == 'nt':  # pragma: no cover (windows)
     except WindowsError:
         terminal_supports_color = False
 
-RED = '\033[41m'
-GREEN = '\033[42m'
-YELLOW = '\033[43;30m'
-TURQUOISE = '\033[46;30m'
+RED = '\033[7m\033[31m'
+GREEN = '\033[7m\033[32m'
+YELLOW = '\033[7m\033[33m'
+TURQUOISE = '\033[7m\033[36m'
 NORMAL = '\033[0m'
 
 
