@@ -178,10 +178,49 @@ else:
 
 
 def main():
+    import time
+
+    start = time.time()
     retv, stdin = _run_legacy()
+    verbose = os.environ.get("PRE_COMMIT_VERBOSE", "0") == "1"
+    if verbose:
+        stdout = None
+    else:
+        print('Running pre-commit: ', end='', flush=True)
+        stdout = subprocess.PIPE
     try:
         _validate_config()
-        return retv | _subprocess_call(_exe() + _opts(stdin))
+        p = subprocess.Popen(_exe() + _opts(stdin) + ("--color=always",), stdout=stdout)
+        try:
+            p.wait()
+        except KeyboardInterrupt:
+            assert p.returncode == 1
+        except Exception as exc:
+            print("Unexpected exception:", exc)
+        duration = time.time() - start
+        if p.stdout:
+            out = p.stdout.read().decode()
+            if p.returncode == 0:
+                lines = out.splitlines()
+                passed, skipped = 0, 0
+                for line in lines:
+                    if line.endswith('Passed\x1b[0m'):
+                        print('✔', end='')
+                        passed += 1
+                    elif line.endswith('Skipped\x1b[0m'):
+                        print('…', end='')
+                        skipped += 1
+                print(
+                    " ({} passed, {} skipped in {:.2f}s)".format(
+                        passed, skipped, duration
+                    )
+                )
+            else:
+                print('\r', end='')
+                print(out)
+        else:
+            print("duration: {:.2}s".format(duration))
+        return retv | p.returncode
     except EarlyExit:
         return retv
     except FatalError as e:
