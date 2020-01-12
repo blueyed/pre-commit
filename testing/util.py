@@ -2,13 +2,13 @@ from __future__ import unicode_literals
 
 import contextlib
 import os.path
+import subprocess
 import sys
 
 import pytest
 
 from pre_commit import parse_shebang
 from pre_commit.languages.docker import docker_is_running
-from pre_commit.languages.pcre import GREP
 from pre_commit.util import cmd_output
 from testing.auto_namedtuple import auto_namedtuple
 
@@ -24,25 +24,26 @@ def cmd_output_mocked_pre_commit_home(*args, **kwargs):
     # keyword-only argument
     tempdir_factory = kwargs.pop('tempdir_factory')
     pre_commit_home = kwargs.pop('pre_commit_home', tempdir_factory.get())
+    kwargs.setdefault('stderr', subprocess.STDOUT)
     # Don't want to write to the home directory
     env = dict(kwargs.pop('env', os.environ), PRE_COMMIT_HOME=pre_commit_home)
-    return cmd_output(*args, env=env, **kwargs)
+    ret, out, _ = cmd_output(*args, env=env, **kwargs)
+    return ret, out.replace('\r\n', '\n'), None
 
 
 skipif_cant_run_docker = pytest.mark.skipif(
     os.name == 'nt' or not docker_is_running(),
     reason="Docker isn't running or can't be accessed",
 )
-
 skipif_cant_run_swift = pytest.mark.skipif(
     parse_shebang.find_executable('swift') is None,
-    reason='swift isn\'t installed or can\'t be found',
+    reason="swift isn't installed or can't be found",
 )
-
 xfailif_windows_no_ruby = pytest.mark.xfail(
     os.name == 'nt',
     reason='Ruby support not yet implemented on windows.',
 )
+xfailif_windows = pytest.mark.xfail(os.name == 'nt', reason='windows')
 
 
 def broken_deep_listdir():  # pragma: no cover (platform specific)
@@ -65,16 +66,6 @@ xfailif_broken_deep_listdir = pytest.mark.xfail(
     reason='Node on windows requires deep listdir',
 )
 
-
-def platform_supports_pcre():
-    output = cmd_output(GREP, '-P', "Don't", 'CHANGELOG.md', retcode=None)
-    return output[0] == 0 and "Don't use readlink -f" in output[1]
-
-
-xfailif_no_pcre_support = pytest.mark.xfail(
-    not platform_supports_pcre(),
-    reason='grep -P is not supported on this platform',
-)
 
 xfailif_no_symlink = pytest.mark.xfail(
     not hasattr(os, 'symlink'),
@@ -137,8 +128,10 @@ def cwd(path):
 def git_commit(*args, **kwargs):
     fn = kwargs.pop('fn', cmd_output)
     msg = kwargs.pop('msg', 'commit!')
+    kwargs.setdefault('stderr', subprocess.STDOUT)
 
     cmd = ('git', 'commit', '--allow-empty', '--no-gpg-sign', '-a') + args
     if msg is not None:  # allow skipping `-m` with `msg=None`
         cmd += ('-m', msg)
-    return fn(*cmd, **kwargs)
+    ret, out, _ = fn(*cmd, **kwargs)
+    return ret, out.replace('\r\n', '\n')

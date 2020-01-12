@@ -70,7 +70,8 @@ class AppendReplaceDefault(argparse.Action):
 def _add_hook_type_option(parser):
     parser.add_argument(
         '-t', '--hook-type', choices=(
-            'pre-commit', 'pre-push', 'prepare-commit-msg', 'commit-msg',
+            'pre-commit', 'pre-merge-commit', 'pre-push',
+            'prepare-commit-msg', 'commit-msg',
         ),
         action=AppendReplaceDefault,
         default=['pre-commit'],
@@ -122,12 +123,20 @@ def _adjust_args_and_chdir(args):
         args.repo = os.path.abspath(args.repo)
 
     try:
-        os.chdir(git.get_root())
+        toplevel = git.get_root()
     except CalledProcessError:
         raise FatalError(
             'git failed. Is it installed, and are you in a Git repository '
             'directory?',
         )
+    else:
+        if toplevel == '':  # pragma: no cover (old git)
+            raise FatalError(
+                'git toplevel unexpectedly empty! make sure you are not '
+                'inside the `.git` directory of your repository.',
+            )
+        else:
+            os.chdir(toplevel)
 
     args.config = os.path.relpath(args.config)
     if args.command in {'run', 'try-repo'}:
@@ -139,7 +148,7 @@ def _adjust_args_and_chdir(args):
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     argv = [five.to_text(arg) for arg in argv]
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog='pre-commit')
 
     # https://stackoverflow.com/a/8521644/812183
     parser.add_argument(
@@ -157,14 +166,15 @@ def main(argv=None):
     _add_color_option(autoupdate_parser)
     _add_config_option(autoupdate_parser)
     autoupdate_parser.add_argument(
-        '--tags-only', action='store_true', help='LEGACY: for compatibility',
-    )
-    autoupdate_parser.add_argument(
         '--bleeding-edge', action='store_true',
         help=(
             'Update to the bleeding edge of `master` instead of the latest '
             'tagged version (the default behavior).'
         ),
+    )
+    autoupdate_parser.add_argument(
+        '--freeze', action='store_true',
+        help='Store "frozen" hashes in `rev` instead of tag names',
     )
     autoupdate_parser.add_argument(
         '--repo', dest='repos', action='append', metavar='REPO',
@@ -299,11 +309,10 @@ def main(argv=None):
         store.mark_config_used(args.config)
 
         if args.command == 'autoupdate':
-            if args.tags_only:
-                logger.warning('--tags-only is the default')
             return autoupdate(
                 args.config, store,
                 tags_only=not args.bleeding_edge,
+                freeze=args.freeze,
                 repos=args.repos,
             )
         elif args.command == 'clean':

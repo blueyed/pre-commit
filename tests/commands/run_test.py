@@ -4,8 +4,8 @@ from __future__ import unicode_literals
 import io
 import os.path
 import pipes
-import subprocess
 import sys
+import time
 
 import mock
 import pytest
@@ -26,6 +26,7 @@ from testing.fixtures import make_consuming_repo
 from testing.fixtures import modify_config
 from testing.fixtures import read_config
 from testing.fixtures import sample_meta_config
+from testing.fixtures import write_config
 from testing.util import cmd_output_mocked_pre_commit_home
 from testing.util import cwd
 from testing.util import git_commit
@@ -94,7 +95,7 @@ def test_run_all_hooks_failing(cap_out, store, repo_with_failing_hook):
         (
             b'Failing hook',
             b'Failed',
-            b'hookid: failing_hook',
+            b'hook id: failing_hook',
             b'Fail\nfoo.py\n',
         ),
         expected_ret=1,
@@ -125,14 +126,14 @@ def test_hook_that_modifies_but_returns_zero(cap_out, store, tempdir_factory):
                 # The first should fail
                 b'Failed',
                 # With a modified file (default message + the hook's output)
-                b'Files were modified by this hook. Additional output:\n\n'
+                b'- files were modified by this hook\n\n'
                 b'Modified: foo.py',
                 # The next hook should pass despite the first modifying
                 b'Passed',
                 # The next hook should fail
                 b'Failed',
                 # bar.py was modified, but provides no additional output
-                b'Files were modified by this hook.\n',
+                b'- files were modified by this hook\n',
             ),
             1,
             True,
@@ -164,20 +165,55 @@ def test_exclude_types_hook_repository(cap_out, store, tempdir_factory):
         assert b'exe' not in printed
 
 
-def test_global_exclude(cap_out, store, tempdir_factory):
-    git_path = make_consuming_repo(tempdir_factory, 'script_hooks_repo')
-    with cwd(git_path):
-        with modify_config() as config:
-            config['exclude'] = '^foo.py$'
-        open('foo.py', 'a').close()
-        open('bar.py', 'a').close()
-        cmd_output('git', 'add', '.')
-        opts = run_opts(verbose=True)
-        ret, printed = _do_run(cap_out, store, git_path, opts)
-        assert ret == 0
-        # Does not contain foo.py since it was excluded
-        expected = b'hookid: bash_hook\n\nbar.py\nHello World\n\n'
-        assert printed.endswith(expected)
+def test_global_exclude(cap_out, store, in_git_dir):
+    config = {
+        'exclude': r'^foo\.py$',
+        'repos': [{'repo': 'meta', 'hooks': [{'id': 'identity'}]}],
+    }
+    write_config('.', config)
+    open('foo.py', 'a').close()
+    open('bar.py', 'a').close()
+    cmd_output('git', 'add', '.')
+    opts = run_opts(verbose=True)
+    ret, printed = _do_run(cap_out, store, str(in_git_dir), opts)
+    assert ret == 0
+    # Does not contain foo.py since it was excluded
+    assert printed.startswith(b'identity' + b'.' * 65 + b'Passed\n')
+    assert printed.endswith(b'\n\n.pre-commit-config.yaml\nbar.py\n\n')
+
+
+def test_global_files(cap_out, store, in_git_dir):
+    config = {
+        'files': r'^bar\.py$',
+        'repos': [{'repo': 'meta', 'hooks': [{'id': 'identity'}]}],
+    }
+    write_config('.', config)
+    open('foo.py', 'a').close()
+    open('bar.py', 'a').close()
+    cmd_output('git', 'add', '.')
+    opts = run_opts(verbose=True)
+    ret, printed = _do_run(cap_out, store, str(in_git_dir), opts)
+    assert ret == 0
+    # Does not contain foo.py since it was excluded
+    assert printed.startswith(b'identity' + b'.' * 65 + b'Passed\n')
+    assert printed.endswith(b'\n\nbar.py\n\n')
+
+
+@pytest.mark.parametrize(
+    ('t1', 't2', 'expected'),
+    (
+        (1.234, 2., b'\n- duration: 0.77s\n'),
+        (1., 1., b'\n- duration: 0s\n'),
+    ),
+)
+def test_verbose_duration(cap_out, store, in_git_dir, t1, t2, expected):
+    write_config('.', {'repo': 'meta', 'hooks': [{'id': 'identity'}]})
+    cmd_output('git', 'add', '.')
+    opts = run_opts(verbose=True)
+    with mock.patch.object(time, 'time', side_effect=(t1, t2)):
+        ret, printed = _do_run(cap_out, store, str(in_git_dir), opts)
+    assert ret == 0
+    assert expected in printed
 
 
 @pytest.mark.parametrize(
@@ -406,23 +442,21 @@ def test_merge_conflict_resolved(cap_out, store, in_merge_conflict):
 
 
 @pytest.mark.parametrize(
-    ('hooks', 'verbose', 'expected'),
+    ('hooks', 'expected'),
     (
-        ([], True, 80),
-        ([auto_namedtuple(id='a', name='a' * 51)], False, 81),
-        ([auto_namedtuple(id='a', name='a' * 51)], True, 85),
+        ([], 80),
+        ([auto_namedtuple(id='a', name='a' * 51)], 81),
         (
             [
                 auto_namedtuple(id='a', name='a' * 51),
                 auto_namedtuple(id='b', name='b' * 52),
             ],
-            False,
             82,
         ),
     ),
 )
-def test_compute_cols(hooks, verbose, expected):
-    assert _compute_cols(hooks, verbose) == expected
+def test_compute_cols(hooks, expected):
+    assert _compute_cols(hooks) == expected
 
 
 @pytest.mark.parametrize(
@@ -476,7 +510,7 @@ def test_hook_id_in_verbose_output(cap_out, store, repo_with_passing_hook):
     ret, printed = _do_run(
         cap_out, store, repo_with_passing_hook, run_opts(verbose=True),
     )
-    assert b'[bash_hook] Bash hook' in printed
+    assert b'- hook id: bash_hook' in printed
 
 
 def test_multiple_hooks_same_id(cap_out, store, repo_with_passing_hook):
@@ -529,16 +563,14 @@ def test_stdout_write_bug_py26(repo_with_failing_hook, store, tempdir_factory):
         install(C.CONFIG_FILE, store, hook_types=['pre-commit'])
 
         # Have to use subprocess because pytest monkeypatches sys.stdout
-        _, stdout, _ = git_commit(
+        _, out = git_commit(
             fn=cmd_output_mocked_pre_commit_home,
-            # git commit puts pre-commit to stderr
-            stderr=subprocess.STDOUT,
-            retcode=None,
             tempdir_factory=tempdir_factory,
+            retcode=None,
         )
-        assert 'UnicodeEncodeError' not in stdout
+        assert 'UnicodeEncodeError' not in out
         # Doesn't actually happen, but a reasonable assertion
-        assert 'UnicodeDecodeError' not in stdout
+        assert 'UnicodeDecodeError' not in out
 
 
 def test_lots_of_files(store, tempdir_factory):
@@ -560,8 +592,6 @@ def test_lots_of_files(store, tempdir_factory):
 
         git_commit(
             fn=cmd_output_mocked_pre_commit_home,
-            # git commit puts pre-commit to stderr
-            stderr=subprocess.STDOUT,
             tempdir_factory=tempdir_factory,
         )
 
@@ -700,32 +730,6 @@ def test_local_hook_fails(cap_out, store, repo_with_passing_hook):
         opts={},
         expected_outputs=[b''],
         expected_ret=1,
-        stage=False,
-    )
-
-
-def test_pcre_deprecation_warning(cap_out, store, repo_with_passing_hook):
-    config = {
-        'repo': 'local',
-        'hooks': [{
-            'id': 'pcre-hook',
-            'name': 'pcre-hook',
-            'language': 'pcre',
-            'entry': '.',
-        }],
-    }
-    add_config_to_repo(repo_with_passing_hook, config)
-
-    _test_run(
-        cap_out,
-        store,
-        repo_with_passing_hook,
-        opts={},
-        expected_outputs=[
-            b'[WARNING] `pcre-hook` (from local) uses the deprecated '
-            b'pcre language.',
-        ],
-        expected_ret=0,
         stage=False,
     )
 

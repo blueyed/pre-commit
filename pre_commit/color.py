@@ -15,6 +15,7 @@ RED = '\033[31m'
 GREEN = '\033[32m'
 YELLOW = '\033[33m'
 TURQUOISE = '\033[36m'
+SUBTLE = '\033[2m'
 NORMAL = '\033[0m'
 
 

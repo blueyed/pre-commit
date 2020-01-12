@@ -39,6 +39,11 @@ def test_adjust_args_and_chdir_not_in_git_dir(in_tmpdir):
         main._adjust_args_and_chdir(Args())
 
 
+def test_adjust_args_and_chdir_in_dot_git_dir(in_git_dir):
+    with in_git_dir.join('.git').as_cwd(), pytest.raises(FatalError):
+        main._adjust_args_and_chdir(Args())
+
+
 def test_adjust_args_and_chdir_noop(in_git_dir):
     args = Args(command='run', files=['f1', 'f2'])
     main._adjust_args_and_chdir(args)
@@ -185,8 +190,3 @@ def test_expected_fatal_error_no_git_repo(in_tmpdir, cap_out, mock_store_dir):
         'Is it installed, and are you in a Git repository directory?'
     )
     assert cap_out_lines[-1] == 'Check the log at {}'.format(log_file)
-
-
-def test_warning_on_tags_only(mock_commands, cap_out, mock_store_dir):
-    main.main(('autoupdate', '--tags-only'))
-    assert '--tags-only is the default' in cap_out.get()

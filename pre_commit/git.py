@@ -32,7 +32,7 @@ def no_git_env(_env=None):
     return {
         k: v for k, v in _env.items()
         if not k.startswith('GIT_') or
-        k in {'GIT_EXEC_PATH', 'GIT_SSH', 'GIT_SSH_COMMAND'}
+        k in {'GIT_EXEC_PATH', 'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_SSL_CAINFO'}
     }
 
 
@@ -141,7 +141,7 @@ def has_diff(*args, **kwargs):
     repo = kwargs.pop('repo', '.')
     assert not kwargs, kwargs
     cmd = ('git', 'diff', '--quiet', '--no-ext-diff') + args
-    return cmd_output_b(*cmd, cwd=repo, retcode=None)[0]
+    return cmd_output_b(*cmd, cwd=repo, retcode=None)[0] == 1
 
 
 def has_core_hookpaths_set():

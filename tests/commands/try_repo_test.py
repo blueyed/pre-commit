@@ -3,6 +3,9 @@ from __future__ import unicode_literals
 
 import os.path
 import re
+import time
+
+import mock
 
 from pre_commit import git
 from pre_commit.commands.try_repo import try_repo
@@ -21,8 +24,7 @@ def try_repo_opts(repo, ref=None, **kwargs):
 
 
 def _get_out(cap_out):
-    out = cap_out.get().replace('\r\n', '\n')
-    out = re.sub(r'\[INFO\].+\n', '', out)
+    out = re.sub(r'\[INFO\].+\n', '', cap_out.get())
     start, using_config, config, rest = out.split('=' * 79 + '\n')
     assert using_config == 'Using config:\n'
     return start, config, rest
@@ -41,7 +43,8 @@ def _run_try_repo(tempdir_factory, **kwargs):
 
 
 def test_try_repo_repo_only(cap_out, tempdir_factory):
-    _run_try_repo(tempdir_factory, verbose=True)
+    with mock.patch.object(time, 'time', return_value=0.0):
+        _run_try_repo(tempdir_factory, verbose=True)
     start, config, rest = _get_out(cap_out)
     assert start == ''
     assert re.match(
@@ -54,15 +57,18 @@ def test_try_repo_repo_only(cap_out, tempdir_factory):
         '    -   id: bash_hook3\n$',
         config,
     )
-    assert rest == (
-        '[bash_hook] Bash hook................................(no files to check)Skipped\n'  # noqa: E501
-        '[bash_hook2] Bash hook...................................................Passed\n'  # noqa: E501
-        'hookid: bash_hook2\n'
-        '\n'
-        'test-file\n'
-        '\n'
-        '[bash_hook3] Bash hook...............................(no files to check)Skipped\n'  # noqa: E501
-    )
+    assert rest == '''\
+Bash hook............................................(no files to check)Skipped
+- hook id: bash_hook
+Bash hook................................................................Passed
+- hook id: bash_hook2
+- duration: 0s
+
+test-file
+
+Bash hook............................................(no files to check)Skipped
+- hook id: bash_hook3
+'''
 
 
 def test_try_repo_with_specific_hook(cap_out, tempdir_factory):
@@ -77,7 +83,10 @@ def test_try_repo_with_specific_hook(cap_out, tempdir_factory):
         '    -   id: bash_hook\n$',
         config,
     )
-    assert rest == '[bash_hook] Bash hook................................(no files to check)Skipped\n'  # noqa: E501
+    assert rest == '''\
+Bash hook............................................(no files to check)Skipped
+- hook id: bash_hook
+'''
 
 
 def test_try_repo_relative_path(cap_out, tempdir_factory):
@@ -87,6 +96,15 @@ def test_try_repo_relative_path(cap_out, tempdir_factory):
         relative_repo = os.path.relpath(repo, '.')
         # previously crashed on cloning a relative path
         assert not try_repo(try_repo_opts(relative_repo, hook='bash_hook'))
+
+
+def test_try_repo_bare_repo(cap_out, tempdir_factory):
+    repo = make_repo(tempdir_factory, 'modified_file_returns_zero_repo')
+    with cwd(git_dir(tempdir_factory)):
+        _add_test_file()
+        bare_repo = os.path.join(repo, '.git')
+        # previously crashed attempting modification changes
+        assert not try_repo(try_repo_opts(bare_repo, hook='bash_hook'))
 
 
 def test_try_repo_specific_revision(cap_out, tempdir_factory):

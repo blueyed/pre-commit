@@ -154,29 +154,16 @@ exit_cmd = parse_shebang.normalize_cmd(('bash', '-c', 'exit $1', '--'))
 max_length = len(' '.join(exit_cmd)) + 3
 
 
-def test_xargs_negate():
-    ret, _ = xargs.xargs(
-        exit_cmd, ('1',), negate=True, _max_length=max_length,
-    )
-    assert ret == 0
-
-    ret, _ = xargs.xargs(
-        exit_cmd, ('1', '0'), negate=True, _max_length=max_length,
-    )
-    assert ret == 1
-
-
-def test_xargs_negate_command_not_found():
-    ret, _ = xargs.xargs(('cmd-not-found',), ('1',), negate=True)
-    assert ret != 0
-
-
 def test_xargs_retcode_normal():
     ret, _ = xargs.xargs(exit_cmd, ('0',), _max_length=max_length)
     assert ret == 0
 
     ret, _ = xargs.xargs(exit_cmd, ('0', '1'), _max_length=max_length)
     assert ret == 1
+
+    # takes the maximum return code
+    ret, _ = xargs.xargs(exit_cmd, ('0', '5', '1'), _max_length=max_length)
+    assert ret == 5
 
 
 def test_xargs_concurrency():
